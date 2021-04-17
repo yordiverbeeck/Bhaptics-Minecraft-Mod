@@ -1,4 +1,4 @@
-package com.yordinateur.bhaptics;
+package com.yordivision.bhaptics;
 
 import com.bhaptics.haptic.HapticPlayer;
 import com.bhaptics.haptic.HapticPlayerImpl;
@@ -7,8 +7,10 @@ import com.bhaptics.haptic.utils.StringUtils;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.monster.CreeperEntity;
 import net.minecraft.entity.monster.SkeletonEntity;
+import net.minecraft.entity.monster.ZombieEntity;
 import net.minecraft.entity.passive.IronGolemEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.projectile.ArrowEntity;
 import net.minecraft.util.math.vector.Vector3d;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
@@ -30,7 +32,7 @@ import java.util.*;
 @Mod("bhaptics")
 public class bhaptics
 {
-    final String appId  = "com.yordinateur.bhaptics";
+    final String appId  = "com.yordivision.bhaptics";
     final String appName = "Bhaptics Minecraft";
     public HapticPlayer hapticPlayer;
     private static final Logger LOGGER = LogManager.getLogger();
@@ -40,37 +42,35 @@ public class bhaptics
 
         MinecraftForge.EVENT_BUS.register(this);
 
-
-        boolean connected = false;
-        hapticPlayer = new HapticPlayerImpl(appId, appName, connected);
-        sleep(2000);
+        hapticPlayer = new HapticPlayerImpl(appId, appName, true,(connected)->{
+            LOGGER.info("Haptic Connected");
+            LOGGER.info(connected);
+            registerFiles();
+        });
         //hapticPlayer.register("arrow", content);
+    }
 
-        Map<String, String> tactFiles = new Hashtable<String, String>();
+    private void registerFiles(){
+        List<String> files = Arrays.asList(
+                "explosion",
+                "explosion2",
+                "explosion3",
+                "playerhitbyprojectile1",
+                "arrowhit",
+                "arrowhit2",
+                "arrowhit3",
+                "playerhitbyprojectile2",
+                "playerhitbyprojectile3",
+                "ironGolem");
 
-        // Inserting elements into the table
-        tactFiles.put("explosion1", "explosion.tact");
-        tactFiles.put("explosion2", "explosion2.tact");
-        tactFiles.put("explosion3", "explosion3.tact");
-        tactFiles.put("playerhitbyprojectile1", "PlayerHitbyProjectile.tact");
-        tactFiles.put("arrowhit", "skelettonArrowLongFront.tact");
-        tactFiles.put("playerhitbyprojectile2", "PlayerHitbyProjectile2.tact");
-        tactFiles.put("playerhitbyprojectile3", "PlayerHitbyProjectile3.tact");
-        tactFiles.put("ironGolem", "IronGolem.tact");
-
-
-        for (Map.Entry<String,String> file : tactFiles.entrySet()) {
-            URL importedURL = getClass().getClassLoader().getResource(file.getValue());
+        for (String fileName : files) {
+            URL importedURL = getClass().getClassLoader().getResource("tactFiles/"+fileName+".tact");
             if(importedURL != null) {
-                File imported = new File(importedURL.getFile());
-                String content = StringUtils.readFile(imported);
-                hapticPlayer.register(file.getKey(), content);
-                System.out.println("Imported: "+file.getValue());
-            }else{
-                System.out.println("Didn't import: "+file.getValue());
+                File file = new File(importedURL.getFile());
+                String content = StringUtils.readFile(file);
+                hapticPlayer.register(fileName, content);
             }
         }
-
     }
 
     private int randomInt(int minimum, int maximum){
@@ -78,19 +78,10 @@ public class bhaptics
         return minimum + rand.nextInt((maximum - minimum) + 1);
     }
 
-    private void sleep(long time) {
-        try {
-            Thread.sleep(time);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
-
     private void playTact(String tactname, float angle){
-        hapticPlayer.submitRegistered(tactname, "test2",
+        hapticPlayer.submitRegistered(tactname, "MinecraftBhaptics",
                 new RotationOption(angle, 0),
                 new ScaleOption(1, 1));
-        System.out.println("Sent damage event: "+tactname+", angle: "+angle);
     }
 
     private void playTact (String tactname){
@@ -105,69 +96,59 @@ public class bhaptics
     @SubscribeEvent
     public void catchHurtEvent(LivingHurtEvent e) {
         if (e.getEntity() instanceof PlayerEntity) {
-            LOGGER.info("OOF! " + e.getSource().getTrueSource()+" -- "+e.getSource().getDamageType() +" -- "+e.getSource().getDamageLocation());
-            Entity AttackerEntity = e.getSource().getTrueSource();
-            LivingEntity player = (LivingEntity) e.getEntity();
-            //LOGGER.info(player.rotationYaw);
+            LOGGER.info("Player hurt!");
 
             //get location where damage is coming from
-            if(e.getSource().getDamageLocation() != null){
-                //TODO: nullpointer
-                float offset = 0;
-                float angle = angleCalc(player.getPositionVec(), AttackerEntity.getPositionVec());
+            if(e.getSource().getSourcePosition() != null){
+                Entity AttackerEntity = e.getSource().getDirectEntity();
+                LivingEntity player = (LivingEntity) e.getEntityLiving();
 
-                float finalangle = (player.rotationYaw - angle) - offset;
+                assert AttackerEntity != null;
+                float angle = angleCalc(player.getPosition(0), AttackerEntity.getPosition(0));
 
-                while (finalangle>360 || finalangle < 0) {
-                    if (finalangle >= 360) {
-                        finalangle -= 360;
-                    } else if (finalangle < 0) {
-                        finalangle += 360;
+                float offsetAngle = player.getRotationVector().y - angle;
+
+                while (offsetAngle>360 || offsetAngle < 0) {
+                    if (offsetAngle >= 360) {
+                        offsetAngle -= 360;
+                    } else if (offsetAngle < 0) {
+                        offsetAngle += 360;
                     }
                 }
 
-                if(AttackerEntity instanceof SkeletonEntity){
-                    playTact("arrowhit", finalangle);
+                if(AttackerEntity instanceof SkeletonEntity || AttackerEntity instanceof ArrowEntity){
+                    playTact("arrowhit", offsetAngle);
+                }else if(AttackerEntity instanceof ZombieEntity){
+                    playTact("ironGolem",offsetAngle);
                 }else if(AttackerEntity instanceof CreeperEntity){
                     switch (randomInt(0,2)){
                         case 0:
-                            playTact("explosion1", finalangle);
+                            playTact("explosion1", offsetAngle);
                             break;
                         case 1:
-                            playTact("explosion2", finalangle);
+                            playTact("explosion2", offsetAngle);
                             break;
                         case 2:
-                            playTact("explosion3", finalangle);
+                            playTact("explosion3", offsetAngle);
                             break;
                     }
                 }else if (AttackerEntity instanceof IronGolemEntity){
-                       playTact("ironGolem",finalangle);
+                       playTact("ironGolem",offsetAngle);
                 }else{
                     switch (randomInt(0,2)){
                         case 0:
-                            playTact("playerhitbyprojectile1", finalangle);
+                            playTact("playerhitbyprojectile1", offsetAngle);
                             break;
                         case 1:
-                            playTact("playerhitbyprojectile2", finalangle);
+                            playTact("playerhitbyprojectile2", offsetAngle);
                             break;
                         case 2:
-                            playTact("playerhitbyprojectile3", finalangle);
+                            playTact("playerhitbyprojectile3", offsetAngle);
                             break;
                     }
                 }
-
-                /*TODO
-                * - map enity on type damage
-                * - map #damage on intensity
-                *
-                * */
-
-                LOGGER.info("yaw rotation " + (player.rotationYaw));
-                LOGGER.info("angelcalc " + angle);
-                LOGGER.info("final calc " + finalangle);
-
             }else{
-                //general damage
+                //general damage, no origin position found
                 playTact("explosion1");
             }
         }
